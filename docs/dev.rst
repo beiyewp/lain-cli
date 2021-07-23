@@ -25,9 +25,16 @@
 
 为了方便开发人员的使用, lain 将各种集群配置全部写死在代码库里: 让用户去抄写集群配置, 永远是不靠谱的, 必定意味着无穷无尽的技术支持工作.
 
-所有的集群配置都汇集于 :code:`lain_cli/clusters.py`, 见示范:
+集群配置分布在两个地方, :code:`lain_cli/clusters.py` 和 :code:`lain_cli/cluster_values`.
+
+:code:`clusters.py::CLUSTER` 这个字典便是集群配置的全部内容, 由于是 Python 代码, 你也可以额外添加自己需要的校验步骤. 总而言之, 最基本的示范如下:
 
 .. literalinclude:: ../lain_cli/clusters.py
+
+那么 :code:`lain_cli/cluster_values` 有什么用呢? 这么说吧, 和集群相关的 values 配置, 都应该放在 :code:`lain_cli/cluster_values/values-[CLUSTER].yaml` 下, 比如:
+
+.. literalinclude:: ../lain_cli/cluster_values/values-test.yaml
+   :language: yaml
 
 集群配置写好了, 本地也测通各项功能正常使用, 那就想办法发布给你的团队们用了.
 

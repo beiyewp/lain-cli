@@ -1,3 +1,8 @@
+# 内外网的服务使用不同的 ingressClass
+# 这样一来, 外部人士就没办法通过内网域名, 直接经由公网流量入口, 访问内部服务了
+# 这些配置当然也可以写在应用级别的 chart/values-[CLUSTER].yaml 下
+# 但这样一来, 每一个应用都需要重复一遍, 因此抽出放在 cluster_values 里, 加强复用
 ingressClass: lain-internal
 externalIngressClass: lain-external
+# 这是 cert-manager 配置, 同样出于复用的考虑, 放在 cluster_values 下, 开发者可没精力维护这种基础设施配置
 clusterIssuer: cert-manager-webhook-dnspod-cluster-issuer
