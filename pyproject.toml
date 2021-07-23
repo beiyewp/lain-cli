@@ -1,0 +1,8 @@
+[tool.vulture]
+ignore_decorators = ["@*.command"]
+exclude = [".ropeproject/"]
+ignore_names = ["_"]
+min_confidence = 80
+
+[tool.pytest.ini_options]
+addopts = "--capture=no --ignore=tests/dummy --doctest-modules lain_cli/utils.py --doctest-modules lain_cli/gitlab.py"

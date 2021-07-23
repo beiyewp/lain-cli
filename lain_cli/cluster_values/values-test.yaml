@@ -1,0 +1,3 @@
+ingressClass: lain-internal
+externalIngressClass: lain-external
+clusterIssuer: cert-manager-webhook-dnspod-cluster-issuer
