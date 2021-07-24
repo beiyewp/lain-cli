@@ -67,13 +67,11 @@ CHART_VERSION = version.parse('0.1.9')
 ENV = os.environ.copy()
 LOOKOUT_ENV = {'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY'}
 LAIN_EXBIN_PREFIX = ENV.get('LAIN_EXBIN_PREFIX') or '/usr/local/bin'
-STERN_BIN = join(LAIN_EXBIN_PREFIX, 'stern')
-STERN_MIN_VERSION = version.parse('1.1.0')
-HELM_BIN = join(LAIN_EXBIN_PREFIX, 'helm')
-HELM_MIN_VERSION = version.parse('v3.6.1')
-KUBECTL_BIN = join(LAIN_EXBIN_PREFIX, 'kubectl')
+HELM_MIN_VERSION_STR = 'v3.6.3'
+HELM_MIN_VERSION = version.parse(HELM_MIN_VERSION_STR)
+STERN_MIN_VERSION_STR = '1.11.0'
+STERN_MIN_VERSION = version.parse(STERN_MIN_VERSION_STR)
 KUBECTL_MIN_VERSION = version.parse('v1.18.0')
-CDN = 'https://static.yashihq.com'
 ENV['PATH'] = f'{LAIN_EXBIN_PREFIX}:{ENV["PATH"]}'
 TIMESTAMP_PATTERN = re.compile(r'\d+')
 LAIN_META_PATTERN = re.compile(r'\d{10,}-\w{40}$')
@@ -1050,14 +1048,22 @@ def stern_version_challenge():
         )
         version_str = version_res.stdout.decode('utf-8').split()[-1]
     except FileNotFoundError:
-        download_binary('stern', dest=STERN_BIN)
+        download_stern()
         return stern_version_challenge()
     except PermissionError:
-        error(f'Bad binary: {STERN_BIN}, remove before use', exit=1)
+        error(f'Bad binary: stern, remove before use', exit=1)
 
     if version.parse(version_str) < STERN_MIN_VERSION:
         warn(f'your stern too old: {version_str}')
-        download_binary('stern', dest=STERN_BIN)
+        download_stern()
+
+
+def download_stern():
+    platform = tell_platform()
+    # download directly from https://github.com/wercker/stern/releases if you
+    # have a better internet connection
+    url = f'https://ghproxy.com/https://github.com/wercker/stern/releases/download/{STERN_MIN_VERSION_STR}/stern_{platform}_amd64'
+    return download_binary(url, join(LAIN_EXBIN_PREFIX, 'stern'))
 
 
 def stern(*args, check=True, **kwargs):
@@ -1075,14 +1081,22 @@ def helm_version_challenge():
         )
         version_str = version_res.stdout.decode('utf-8')
     except FileNotFoundError:
-        download_binary('helm', dest=HELM_BIN)
+        download_helm()
         return helm_version_challenge()
     except PermissionError:
-        error(f'Bad binary: {HELM_BIN}, remove before use', exit=1)
+        error('Bad binary: helm, remove before use', exit=1)
 
     if version.parse(version_str) < HELM_MIN_VERSION:
         warn(f'your helm too old: {version_str}')
-        download_binary('helm', dest=HELM_BIN)
+        download_helm()
+
+
+def download_helm():
+    platform = tell_platform()
+    # download directly from https://github.com/helm/helm/releases/ if you
+    # have a better internet connection
+    url = f'https://mirrors.huaweicloud.com/helm/{HELM_MIN_VERSION_STR}/helm-{HELM_MIN_VERSION_STR}-{platform}-amd64.tar.gz'
+    return download_binary(url, join(LAIN_EXBIN_PREFIX, 'helm'))
 
 
 def helm(*args, check=True, exit=False, **kwargs):
@@ -1285,14 +1299,22 @@ def kubectl_version_challenge():
         )
         version_str = version_res.stdout.decode('utf-8').strip().split()[-1]
     except FileNotFoundError:
-        download_binary('kubectl', dest=KUBECTL_BIN)
+        download_kubectl()
         return kubectl_version_challenge()
     except PermissionError:
-        error(f'Bad binary: {KUBECTL_BIN}, remove before use', exit=1)
+        error('Bad binary: kubectl, remove before use', exit=1)
 
     if version.parse(version_str) < KUBECTL_MIN_VERSION:
         warn(f'your kubectl version too old: {version_str}')
-        download_binary('kubectl', dest=KUBECTL_BIN)
+        download_kubectl()
+
+
+def download_kubectl():
+    platform = tell_platform()
+    # download directly from https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#install-kubectl-binary-with-curl-on-linux if you
+    # have a bettern internet connection
+    url = f'https://static.yashihq.com/lain4/kubectl-{platform}'
+    return download_binary(url, join(LAIN_EXBIN_PREFIX, 'kubectl'))
 
 
 def kubectl(*args, exit=None, check=True, **kwargs):
@@ -1478,18 +1500,13 @@ def tell_platform():
         return 'darwin'
     if platform.startswith('linux'):
         return 'linux'
-    error(f'Sorry, never seen this platform: {platform}. Use a Mac or Linux for lain4')
-    context().exit(1)
+    raise ValueError(f'Sorry, never seen this platform: {platform}. Use a Mac or Linux for lain')
 
 
-def download_binary(thing, dest):
-    assert thing in {'kubectl', 'helm', 'stern'}
-    platform = tell_platform()
-    url = f'{CDN}/lain4/{thing}-{platform}'
+def download_binary(url, dest):
     headsup = f'''Don\'t mind me, just gonna download {url} into {dest}.
-    If you don't like this, you can either:
-        export LAIN_EXBIN_PREFIX and try this again
-        install kubectl and helm yourself (for example using homebrew)
+    If you want to use different path other than {dest}, export LAIN_EXBIN_PREFIX to customize.
+    Or you can simply install them yourself (for example using homebrew).
     '''
     click.echo(headsup, err=True)
     try:
@@ -1497,21 +1514,12 @@ def download_binary(thing, dest):
             with open(dest, 'wb') as f:
                 shutil.copyfileobj(res.raw, f)
     except KeyboardInterrupt:
-        error(f'Download did not complete, {HELM_BIN} will be cleaned up', exit=1)
+        error(f'Download did not complete, {dest} will be cleaned up', exit=1)
         ensure_absent(f)
 
     # do a `chmod +x` on this thing
     st = os.stat(dest)
     os.chmod(dest, st.st_mode | stat.S_IEXEC)
-    autocompletion_tutorial = {
-        'kubectl': '''For zsh user, checkout https://github.com/robbyrussell/oh-my-zsh/blob/master/plugins/kubectl/kubectl.plugin.zsh
-        Others may learn the same thing at https://kubernetes.io/docs/tasks/tools/install-kubectl/#optional-kubectl-configurations''',
-        'helm': '''For zsh user, checkout https://github.com/robbyrussell/oh-my-zsh/tree/master/plugins/helm
-        Others go see `helm completion help`''',
-    }
-    toast = f'''Download complete, you might wanna setup autocompletion for {thing}:
-        {autocompletion_tutorial[thing]}'''
-    goodjob(toast)
 
 
 def ensure_absent(path):

@@ -88,16 +88,3 @@ lain 调用的 kubectl, helm, 都是直接和 Kubernetes Apiserver 打交道的,
 kubeconfig 也就位了, 那事情就算完成了, 接下来就是教育你的团队, 开始普及 lain, 可以参考 :ref:`quick-start` 的内容.
 
 .. _lain-cluster-config:
-
-更新三方 Binary CLI
--------------------
-
-lain 的功能离不开 `kubectl <https://kubernetes.io/docs/tasks/tools/install-kubectl/#install-kubectl-on-linux>`_ / `helm <https://github.com/helm/helm/releases>`_ / `stern <https://github.com/wercker/stern/releases>`_ / docker / git, 用户可以用自己喜欢的方式来安装这些 CLI, 但出于国内构建需要, 我们把这些 binary 上传到了我们自己的 CDN, 你有需要的话, 也可以替换成自己的存储.
-
-.. code-block:: bash
-
-    # 首先, 更新 CDN 的可执行文件
-
-    # 如果需要让 lain 提高 helm, kubectl 的版本号, 并且在用户的版本过低的时候自动更新
-    # 则需要修改一下代码库里写死的版本号
-    ack MIN_VERSION lain_cli/utils.py
