@@ -14,6 +14,8 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 
 from lain_cli.utils import (
+    parse_ready,
+    get_pods,
     context,
     ensure_str,
     kubectl,
@@ -37,19 +39,6 @@ CONTENT_VENDERER = {
 
 def set_content(k, v):
     CONTENT_VENDERER[k] = v
-
-
-def parse_ready(ready_str):
-    """
-    >>> parse_ready('0/1')
-    False
-    >>> parse_ready('1/1')
-    True
-    """
-    left, right = ready_str.split('/')
-    if left != right:
-        return False
-    return True
 
 
 async def refresh_events_text():
@@ -88,17 +77,12 @@ def build_app_status_command():
     appname = ctx.obj['appname']
     pod_cmd = [
         'get',
-        'po',
-        '-o=wide',
+        'pod',
+        '-owide',
         # add this sort so that abnormal pods appear on top
         '--sort-by={.status.phase}',
-        '-l',
-        f'app.kubernetes.io/name={appname}',
+        '-lapp.kubernetes.io/name={appname}',
     ]
-    field_selector_clause = (
-        '--field-selector=status.phase!=Completed,status.phase!=Succeeded'
-    )
-    pod_cmd.append(field_selector_clause)
     ctx.obj['watch_pod_command'] = pod_cmd
     if tell_pods_count() > 13:
         ctx.obj['too_many_pods'] = True
@@ -119,33 +103,17 @@ def build_app_status_command():
 
 def pod_text(too_many_pods=None):
     ctx = context()
-    cmd = ctx.obj['watch_pod_command']
-    res = kubectl(*cmd, timeout=9, capture_output=True, check=False)
-    if rc(res):
-        return ensure_str(res.stderr)
-    report = ensure_str(res.stdout)
-    podlines = report.splitlines()
-    bad_pods = podlines[0:1]
-    for podline in podlines[1:]:
-        _, ready_str, status, restarts, *_ = podline.split()
-        if not parse_ready(ready_str):
-            bad_pods.append(podline)
-            continue
-        if status != 'Running':
-            # 状态异常的 pods 是我们最为关心的, 因此塞到头部方便取用
-            bad_pods.insert(1, podline)
-            continue
-        if restarts != '0':
-            bad_pods.append(podline)
-            continue
-
-    CONTENT_VENDERER['bad_pods'] = bad_pods
+    appname = ctx.obj['appname']
     if too_many_pods is None:
         too_many_pods = ctx.obj['too_many_pods']
 
-    if too_many_pods:
-        report = '\n'.join(bad_pods)
-
+    res, pods = get_pods(
+        appname=appname, headers=True, show_only_bad_pods=too_many_pods
+    )
+    if rc(res):
+        return ensure_str(res.stderr)
+    CONTENT_VENDERER['bad_pods'] = pods
+    report = '\n'.join(pods)
     return report
 
 
@@ -371,7 +339,7 @@ def build_cluster_status_command():
         'get',
         'po',
         '--all-namespaces',
-        '--field-selector=status.phase!=Completed,status.phase!=Succeeded,status.phase!=Running',
+        '-owide',
     ]
     ctx.obj['watch_bad_pod_title'] = 'k {}'.format(list2cmdline(pod_cmd))
 

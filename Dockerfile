@@ -13,7 +13,8 @@ WORKDIR /srv/lain
 
 # https://github.com/wercker/stern/releases/
 # https://github.com/helm/helm/releases/
-RUN apt-get install -y curl && \
+RUN apt-get update && \
+    apt-get install -y curl && \
     curl -L https://ghproxy.com/https://github.com/wercker/stern/releases/download/1.11.0/stern_linux_amd64 -o /usr/local/bin/stern && \
     echo "e0b39dc26f3a0c7596b2408e4fb8da533352b76aaffdc18c7ad28c833c9eb7db /usr/local/bin/stern" | sha256sum --check && \
     chmod +x /usr/local/bin/stern && \

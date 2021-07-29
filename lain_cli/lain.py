@@ -36,6 +36,7 @@ from lain_cli.prompt import (
 )
 from lain_cli.tencent import TencentClient
 from lain_cli.utils import (
+    get_pods,
     CHART_DIR_NAME,
     CHART_TEMPLATE_DIR,
     CHART_VERSION,
@@ -161,7 +162,11 @@ def admin():
 
 
 @admin.command()
-def delete_bad_pod():
+@click.option(
+    '--dry-run',
+    is_flag=True,
+)
+def delete_bad_pod(dry_run):
     jobs = kubectl(
         'get',
         'job',
@@ -170,14 +175,14 @@ def delete_bad_pod():
         capture_output=True,
     )
     job_names = tuple(ensure_str(jobs.stdout).split())
-    pods = kubectl('get', 'po', '--no-headers', capture_output=True)
+    _, pods = get_pods(show_only_bad_pods=True, check=True)
 
     def is_job(pod_name):
         for job_name in job_names:
             if pod_name.startswith(job_name):
                 return job_name
 
-    for line in ensure_str(pods.stdout).splitlines():
+    for line in pods:
         pod_name, _, state, *_ = line.split()
         job_name = is_job(pod_name)
         if job_name:
@@ -187,10 +192,7 @@ def delete_bad_pod():
             resource_type = 'pod'
             resource_name = pod_name
 
-        if state in {'Running', 'Completed', 'Terminating', 'ContainerCreating'}:
-            continue
-        warn(f'{pod_name} in bad status: {state}')
-        kubectl('delete', resource_type, resource_name, check=False)
+        kubectl('delete', resource_type, resource_name, check=False, dry_run=dry_run)
 
 
 @admin.command()
@@ -585,7 +587,6 @@ def status(ctx, simple):
     # we don't want stderr outputs to mess with our full screen application
     ctx.obj['silent'] = True
     if simple:
-        appname = ctx.obj['appname']
         grafana_url = tell_grafana_url()
         if grafana_url:
             echo(f'grafana url: {grafana_url}')

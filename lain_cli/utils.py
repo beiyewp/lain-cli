@@ -1,4 +1,5 @@
 import asyncio
+import tarfile
 import base64
 import inspect
 import itertools
@@ -286,6 +287,61 @@ def tell_ingress_urls():
         make_external_url(i) for i in externalIngresses
     )
     return list(part1) + list(part2)
+
+
+def parse_ready(ready_str):
+    """
+    >>> parse_ready('0/1')
+    False
+    >>> parse_ready('1/1')
+    True
+    """
+    left, right = ready_str.split('/')
+    if left != right:
+        return False
+    return True
+
+
+def get_pods(appname=None, headers=False, show_only_bad_pods=None, check=False):
+    cmd = [
+        'get',
+        'pod',
+        '-o=wide',
+    ]
+    if appname:
+        cmd.append(f'-lapp.kubernetes.io/name={appname}')
+
+    res = kubectl(*cmd, capture_output=True, check=check)
+    pods = ensure_str(res.stdout).splitlines()
+    if not show_only_bad_pods:
+        if headers:
+            return res, pods
+        return res, pods[1:]
+    header = pods.pop(0)
+    bad_pods = []
+    for line in pods:
+        pod_name, _, state, *_ = line.split()
+        for podline in pods[1:]:
+            # ['deploy-x-x', '1/1', 'Running', '0', '6h6m', '192.168.0.13', 'node-1', '<none>', '1/1']
+            _, ready_str, status, restarts, *_ = podline.split()
+            if status == 'Completed':
+                # job pods will be ignored
+                continue
+            if not parse_ready(ready_str):
+                bad_pods.append(podline)
+                continue
+            if status not in {'Running', 'Terminating', 'ContainerCreating'}:
+                # 状态异常的 pods 是我们最为关心的, 因此塞到头部方便取用
+                bad_pods.insert(1, podline)
+                continue
+            if int(restarts) > 10:
+                # 本来时不时就会重启节点, 造成容器重启, 因此设置个小阈值, 过滤噪声
+                bad_pods.append(podline)
+                continue
+
+    if headers:
+        return res, [header] + bad_pods
+    return res, bad_pods
 
 
 def pick_pod(deploy_name=None, phase=None, containerStatuses=None):
@@ -980,7 +1036,7 @@ def ensure_resource_initiated(chart=False, secret=False):
     return True
 
 
-def subprocess_run(*args, silent=None, **kwargs):
+def subprocess_run(*args, silent=None, dry_run=False, **kwargs):
     """Same in functionality, but better than subprocess.run
 
     Args:
@@ -1009,6 +1065,8 @@ def subprocess_run(*args, silent=None, **kwargs):
 
     abort_on_fail = kwargs.pop('abort_on_fail', None)
     excall(*args, silent=silent)
+    if dry_run:
+        return
     try:
         res = subprocess.run(*args, **kwargs)
     except subprocess.TimeoutExpired:
@@ -1051,7 +1109,7 @@ def stern_version_challenge():
         download_stern()
         return stern_version_challenge()
     except PermissionError:
-        error(f'Bad binary: stern, remove before use', exit=1)
+        error('Bad binary: stern, remove before use', exit=1)
 
     if version.parse(version_str) < STERN_MIN_VERSION:
         warn(f'your stern too old: {version_str}')
@@ -1096,7 +1154,7 @@ def download_helm():
     # download directly from https://github.com/helm/helm/releases/ if you
     # have a better internet connection
     url = f'https://mirrors.huaweicloud.com/helm/{HELM_MIN_VERSION_STR}/helm-{HELM_MIN_VERSION_STR}-{platform}-amd64.tar.gz'
-    return download_binary(url, join(LAIN_EXBIN_PREFIX, 'helm'))
+    return download_binary(url, join(LAIN_EXBIN_PREFIX, 'helm'), extract=f'{platform}-amd64/helm')
 
 
 def helm(*args, check=True, exit=False, **kwargs):
@@ -1317,11 +1375,11 @@ def download_kubectl():
     return download_binary(url, join(LAIN_EXBIN_PREFIX, 'kubectl'))
 
 
-def kubectl(*args, exit=None, check=True, **kwargs):
+def kubectl(*args, exit=None, check=True, dry_run=False, **kwargs):
     kubectl_version_challenge()
     cmd = ['kubectl', *args]
     kwargs.setdefault('timeout', 10)
-    completed = subprocess_run(cmd, env=ENV, check=check, **kwargs)
+    completed = subprocess_run(cmd, env=ENV, check=check, dry_run=dry_run, **kwargs)
     if exit:
         context().exit(rc(completed))
 
@@ -1500,22 +1558,39 @@ def tell_platform():
         return 'darwin'
     if platform.startswith('linux'):
         return 'linux'
-    raise ValueError(f'Sorry, never seen this platform: {platform}. Use a Mac or Linux for lain')
+    raise ValueError(
+        f'Sorry, never seen this platform: {platform}. Use a Mac or Linux for lain'
+    )
 
 
-def download_binary(url, dest):
+def download_binary(url, dest, extract=None):
     headsup = f'''Don\'t mind me, just gonna download {url} into {dest}.
     If you want to use different path other than {dest}, export LAIN_EXBIN_PREFIX to customize.
     Or you can simply install them yourself (for example using homebrew).
     '''
     click.echo(headsup, err=True)
+    if extract:
+        download_path = '/tmp/{}'.format(basename(url))
+    else:
+        download_path = dest
+
     try:
         with requests.get(url, stream=True) as res:
-            with open(dest, 'wb') as f:
+            with open(download_path, 'wb') as f:
                 shutil.copyfileobj(res.raw, f)
     except KeyboardInterrupt:
-        error(f'Download did not complete, {dest} will be cleaned up', exit=1)
-        ensure_absent(f)
+        ensure_absent(download_path)
+        error(f'Download did not complete, {download_path} is cleaned up', exit=1)
+
+    if extract:
+        with tarfile.open(download_path) as tarf:
+            for member in tarf.getmembers():
+                if member.name == extract:
+                    binary_name = basename(dest)
+                    member.name = binary_name
+                    tarf.extract(member, path=dirname(dest))
+
+        ensure_absent(download_path)
 
     # do a `chmod +x` on this thing
     st = os.stat(dest)
